@@ -305,6 +305,15 @@ function PromoBadge({ percentual }) {
   return <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}><Tag size={11} /> -{percentual}%</span>;
 }
 
+function LancamentoBadge({ small }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md font-extrabold uppercase ${small ? 'px-1.5 py-0.5 text-[10px]' : 'px-2.5 py-1 text-xs'}`}
+      style={{ background: '#161116', color: '#D4AF37', letterSpacing: '0.03em', border: '1px solid #D4AF37' }}>
+      <Sparkles size={small ? 10 : 12} /> Lançamento
+    </span>
+  );
+}
+
 function EmptyState({ icone: Icone, titulo, subtitulo }) {
   return (
     <div className="flex flex-col items-center justify-center text-center py-14 px-6">
@@ -688,7 +697,7 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, campanhas
                   </button>
                   <div className="absolute top-1.5 left-1.5 z-10 flex flex-col gap-1 items-start">
                     {promo && <PromoBadge percentual={promo.percentual} />}
-                    {p.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+                    {p.lancamento && <LancamentoBadge small />}
                   </div>
                   <div className="aspect-square w-full flex items-center justify-center" style={{ background: categoryColor(p.categoria) + '1A' }}>
                     {p.imagemUrl ? (
@@ -729,7 +738,7 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, campanhas
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{p.nome}{p.lancamento && <span className="ml-1.5 badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}</p>
+                    <p className="text-sm font-medium truncate flex items-center gap-1.5" style={{ color: 'var(--ink)' }}>{p.nome}{p.lancamento && <LancamentoBadge small />}</p>
                     <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.codigo} · {p.quantidade <= 0 ? 'sem estoque' : `${p.quantidade} un.`}</p>
                   </div>
                   {promo && <PromoBadge percentual={promo.percentual} />}
@@ -806,6 +815,7 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, campanhas
             onFinalizarVenda({ carrinho, ...dados });
             limparVenda();
           }}
+          onCancelarVenda={() => limparVenda()}
         />
       )}
       {produtoDetalhe && (
@@ -902,7 +912,7 @@ function ReciboDocumento({ venda, carrinho, empresa, cliente }) {
   );
 }
 
-function EnvioReciboAcoes({ cliente, empresa, textoRecibo, assunto, onConcluir }) {
+function EnvioReciboAcoes({ cliente, empresa, textoRecibo, assunto, onConcluir, onCancelar }) {
   const [statusEmail, setStatusEmail] = useState(cliente?.email ? 'pendente' : 'sememail');
   const [gerandoImagem, setGerandoImagem] = useState(false);
   const [erroImagem, setErroImagem] = useState('');
@@ -979,11 +989,12 @@ function EnvioReciboAcoes({ cliente, empresa, textoRecibo, assunto, onConcluir }
         )}
       </div>
       <button onClick={onConcluir} className="btn-primary w-full mt-3">Nova venda</button>
+      <button onClick={onCancelar} className="text-xs w-full text-center mt-2 py-1" style={{ color: 'var(--danger)' }}>Retornar esta venda (foi engano)</button>
     </div>
   );
 }
 
-function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onConcluir }) {
+function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onConcluir, onCancelarVenda }) {
   const [buscaCliente, setBuscaCliente] = useState('');
   const [clienteSelecionado, setClienteSelecionado] = useState(null);
   const [querNota, setQuerNota] = useState(false);
@@ -1082,7 +1093,7 @@ function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onCo
     return (
       <Modal onClose={() => onConcluir(concluida)} title="Venda finalizada" wide>
         <ReciboDocumento venda={concluida} carrinho={carrinho} empresa={empresa} cliente={clienteSelecionado} />
-        <EnvioReciboAcoes cliente={clienteSelecionado} empresa={empresa} textoRecibo={reciboTexto(concluida)} assunto={`Comprovante da compra — ${empresa.nome || 'Loja'}`} onConcluir={() => onConcluir(concluida)} />
+        <EnvioReciboAcoes cliente={clienteSelecionado} empresa={empresa} textoRecibo={reciboTexto(concluida)} assunto={`Comprovante da compra — ${empresa.nome || 'Loja'}`} onConcluir={() => onConcluir(concluida)} onCancelar={onCancelarVenda} />
       </Modal>
     );
   }
@@ -1193,7 +1204,10 @@ function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onCo
           <span className="text-xl font-semibold" style={{ color: 'var(--ink)', fontFamily: 'var(--font-display)' }}>{formatBRL(totalFinal)}</span>
         </div>
       </div>
-      <button onClick={confirmar} disabled={!pagamentoValido} className="btn-primary w-full disabled:opacity-40">Confirmar venda</button>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={onClose} className="btn-secondary w-full">Cancelar</button>
+        <button onClick={confirmar} disabled={!pagamentoValido} className="btn-primary w-full disabled:opacity-40">Finalizar venda</button>
+      </div>
       <p className="hidden md:block text-[11px] text-center mt-2" style={{ color: 'var(--ink-soft)' }}>Enter confirma · Esc cancela</p>
     </Modal>
   );
@@ -1204,17 +1218,28 @@ function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onCo
 function ProdutoDetalheModal({ produto, promocoes, campanhas, onAdicionar, onClose }) {
   const promo = promocaoAtiva(produto.id, promocoes);
   const campanha = campanhaAtiva(produto.id, campanhas);
+  const imagens = (produto.imagens && produto.imagens.length ? produto.imagens : (produto.imagemUrl ? [produto.imagemUrl] : [])).filter(Boolean);
   return (
     <Modal onClose={onClose} title="Detalhes do produto">
       <div className="flex gap-3 mb-4">
-        <div className="w-20 h-20 rounded-lg flex items-center justify-center shrink-0" style={{ background: categoryColor(produto.categoria) + '1A' }}>
-          {produto.imagemUrl ? <img src={produto.imagemUrl} className="w-full h-full object-cover rounded-lg" alt="" /> : <ImageIcon size={24} style={{ color: categoryColor(produto.categoria) }} />}
-        </div>
+        {imagens.length > 0 ? (
+          <div className="flex gap-1.5 shrink-0">
+            {imagens.slice(0, 2).map((img, i) => (
+              <div key={i} className="w-16 h-20 sm:w-20 sm:h-20 rounded-lg overflow-hidden" style={{ background: categoryColor(produto.categoria) + '1A' }}>
+                <img src={img} className="w-full h-full object-cover" alt="" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="w-20 h-20 rounded-lg flex items-center justify-center shrink-0" style={{ background: categoryColor(produto.categoria) + '1A' }}>
+            <ImageIcon size={24} style={{ color: categoryColor(produto.categoria) }} />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <p className="font-medium" style={{ color: 'var(--ink)' }}>{produto.nome}</p>
           <p className="text-xs mb-1" style={{ color: 'var(--ink-soft)' }}>{produto.codigo} · {produto.subcategoria || produto.categoria}</p>
           <div className="flex flex-wrap gap-1.5">
-            {produto.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+            {produto.lancamento && <LancamentoBadge />}
             {promo && <PromoBadge percentual={promo.percentual} />}
           </div>
         </div>
@@ -1242,25 +1267,39 @@ function ProdutoDetalheModal({ produto, promocoes, campanhas, onAdicionar, onClo
 function ProdutoForm({ produto, categorias, fornecedores, onSalvar, onClose }) {
   const [form, setForm] = useState(produto || {
     codigo: '', nome: '', descricao: '', categoria: categorias[0]?.nome || '', subcategoria: '', precoCusto: '', precoVenda: '',
-    quantidade: '', estoqueIdeal: '', dataEntrada: todayISODate(), imagemUrl: null, fornecedor: '', lancamento: false,
+    quantidade: '', estoqueIdeal: '', dataEntrada: todayISODate(), imagens: [], fornecedor: '', lancamento: false,
   });
   const [showScanner, setShowScanner] = useState(false);
+  const [erro, setErro] = useState('');
 
   const subcategoriasDisponiveis = categorias.find((c) => c.nome === form.categoria)?.subcategorias;
+  const imagens = form.imagens && form.imagens.length ? form.imagens : (form.imagemUrl ? [form.imagemUrl] : []);
 
-  function upload(e) {
+  function uploadFoto(indice, e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setForm((f) => ({ ...f, imagemUrl: reader.result }));
+    reader.onload = () => setForm((f) => {
+      const atuais = f.imagens && f.imagens.length ? [...f.imagens] : (f.imagemUrl ? [f.imagemUrl] : []);
+      atuais[indice] = reader.result;
+      return { ...f, imagens: atuais };
+    });
     reader.readAsDataURL(file);
   }
 
   function salvar() {
-    if (!form.nome || !form.codigo) return;
+    if (!form.nome.trim()) {
+      setErro('Informe o nome do produto');
+      return;
+    }
+    setErro('');
+    const codigoFinal = form.codigo.trim() || ('INT' + Date.now().toString().slice(-8));
     onSalvar({
       ...form,
+      codigo: codigoFinal,
       id: form.id || uid('p'),
+      imagens,
+      imagemUrl: imagens[0] || null,
       subcategoria: subcategoriasDisponiveis ? form.subcategoria : '',
       precoCusto: parseFloat(form.precoCusto) || 0,
       precoVenda: parseFloat(form.precoVenda) || 0,
@@ -1271,14 +1310,19 @@ function ProdutoForm({ produto, categorias, fornecedores, onSalvar, onClose }) {
 
   return (
     <Modal onClose={onClose} title={produto ? 'Editar produto' : 'Novo produto'} wide>
+      <p className="text-xs font-medium mb-2" style={{ color: 'var(--ink-soft)' }}>Fotos do produto (até 2)</p>
       <div className="flex items-center gap-4 mb-4">
-        <div className="w-16 h-16 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: 'var(--bg)' }}>
-          {form.imagemUrl ? <img src={form.imagemUrl} className="w-full h-full object-cover" alt="" /> : <ImageIcon size={22} style={{ color: 'var(--ink-soft)' }} />}
-        </div>
-        <label className="btn-secondary cursor-pointer text-sm">
-          <Upload size={14} className="inline mr-1.5" /> Foto do produto
-          <input type="file" accept="image/*" className="hidden" onChange={upload} />
-        </label>
+        {[0, 1].map((indice) => (
+          <div key={indice} className="flex flex-col items-center gap-2">
+            <div className="w-16 h-16 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: 'var(--bg)' }}>
+              {imagens[indice] ? <img src={imagens[indice]} className="w-full h-full object-cover" alt="" /> : <ImageIcon size={20} style={{ color: 'var(--ink-soft)' }} />}
+            </div>
+            <label className="btn-secondary cursor-pointer text-xs px-2 py-1.5">
+              <Upload size={12} className="inline mr-1" /> Foto {indice + 1}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadFoto(indice, e)} />
+            </label>
+          </div>
+        ))}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <label className="block mb-3">
@@ -1326,6 +1370,7 @@ function ProdutoForm({ produto, categorias, fornecedores, onSalvar, onClose }) {
         <input type="checkbox" checked={!!form.lancamento} onChange={(e) => setForm({ ...form, lancamento: e.target.checked })} className="w-4 h-4" />
         <span className="text-sm" style={{ color: 'var(--ink-soft)' }}>Marcar como lançamento</span>
       </label>
+      {erro && <p className="text-xs mb-2" style={{ color: 'var(--danger)' }}>{erro}</p>}
       <button onClick={salvar} className="btn-primary w-full mt-2">Salvar produto</button>
 
       {showScanner && (
@@ -1405,7 +1450,7 @@ function ProdutosView({ produtos, categorias, fornecedores, role, onSalvar, onEx
                     <td className="px-4 py-3">
                       <p className="font-medium flex items-center gap-1.5" style={{ color: 'var(--ink)' }}>
                         {p.nome}
-                        {p.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+                        {p.lancamento && <LancamentoBadge small />}
                       </p>
                       <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.codigo}{p.fornecedor ? ` · ${p.fornecedor}` : ''}</p>
                     </td>
