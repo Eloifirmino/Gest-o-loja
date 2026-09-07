@@ -22,6 +22,9 @@ const STORAGE_KEYS = {
   PROMOCOES: 'promocoes_v1',
   MOVIMENTACOES: 'movimentacoes_v1',
   CAIXAS: 'caixas_v1',
+  FORNECEDORES: 'fornecedores_v1',
+  TROCAS: 'trocas_v1',
+  CAMPANHAS: 'campanhas_v1',
   SESSAO: 'sessao_v1',
 };
 
@@ -174,6 +177,10 @@ function promocaoAtiva(produtoId, promocoes, dataRef) {
   const ativas = (promocoes || []).filter((p) => p.produtosIds.includes(produtoId) && p.dataInicio <= hoje && hoje <= p.dataFim);
   if (ativas.length === 0) return null;
   return ativas.reduce((maior, p) => (p.percentual > maior.percentual ? p : maior), ativas[0]);
+}
+function campanhaAtiva(produtoId, campanhas, dataRef) {
+  const hoje = dataRef || todayISODate();
+  return (campanhas || []).find((c) => c.produtosIds.includes(produtoId) && c.dataInicio <= hoje && hoje <= c.dataFim) || null;
 }
 
 /* ============================== DADOS DE DEMONSTRAÇÃO ============================== */
@@ -383,13 +390,33 @@ function ScannerModal({ onDetected, onClose }) {
 
 /* ============================== NAVEGAÇÃO ============================== */
 
+function MobileTopBar({ empresa, sessao, onSair }) {
+  return (
+    <div className="md:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-30" style={{ background: 'var(--ink)' }}>
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shrink-0" style={{ background: 'var(--accent)' }}>
+          {empresa.logoUrl ? <img src={empresa.logoUrl} alt="Logo" className="w-full h-full object-cover" /> : <Sparkles size={15} style={{ color: 'var(--ink)' }} />}
+        </div>
+        <div className="min-w-0">
+          <p className="text-white text-sm font-semibold truncate" style={{ fontFamily: 'var(--font-display)' }}>{empresa.nome || 'Minha Loja'}</p>
+          <p className="text-[10px] truncate capitalize" style={{ color: 'rgba(255,255,255,0.55)' }}>{sessao.role === 'admin' ? 'Administrador' : 'Vendedor'} · {sessao.login}</p>
+        </div>
+      </div>
+      <button onClick={onSair} className="p-2 rounded-lg shrink-0" style={{ background: 'rgba(255,255,255,0.1)' }}>
+        <LogOut size={16} style={{ color: '#fff' }} />
+      </button>
+    </div>
+  );
+}
+
 const NAV_ITEMS = [
   { id: 'pdv', label: 'Vender', icone: ShoppingCart, roles: ['admin', 'vendedor'] },
   { id: 'produtos', label: 'Produtos', icone: Package, roles: ['admin', 'vendedor'] },
   { id: 'clientes', label: 'Clientes', icone: Users, roles: ['admin', 'vendedor'] },
   { id: 'caixa', label: 'Caixa', icone: Wallet, roles: ['admin', 'vendedor'] },
   { id: 'dashboard', label: 'Painel', icone: BarChart3, roles: ['admin', 'vendedor'] },
-  { id: 'promocoes', label: 'Campanhas', icone: Tag, roles: ['admin'] },
+  { id: 'campanhas', label: 'Campanhas', icone: Tag, roles: ['admin', 'vendedor'] },
+  { id: 'promocoes', label: 'Promoções', icone: Percent, roles: ['admin', 'vendedor'] },
   { id: 'config', label: 'Ajustes', icone: Settings, roles: ['admin'] },
 ];
 
@@ -513,13 +540,14 @@ function LoginView({ auth, onEntrar, onRecuperarVendedor }) {
 
 /* ============================== TELA: PDV (VENDER) ============================== */
 
-function PDVView({ produtos, clientes, categorias, empresa, promocoes, role, caixaAberto, onAbrirCaixa, onFinalizarVenda }) {
+function PDVView({ produtos, clientes, categorias, empresa, promocoes, campanhas, role, caixaAberto, onAbrirCaixa, onFinalizarVenda }) {
   const [busca, setBusca] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
   const [modoVisual, setModoVisual] = useState(true);
   const [carrinho, setCarrinho] = useState([]);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showAbrirCaixa, setShowAbrirCaixa] = useState(false);
+  const [produtoDetalhe, setProdutoDetalhe] = useState(null);
   const inputRef = useRef(null);
 
   const produtosFiltrados = useMemo(() => {
@@ -643,10 +671,25 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, role, cai
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
             {produtosFiltrados.map((p) => {
               const promo = promocaoAtiva(p.id, promocoes);
+              const campanha = campanhaAtiva(p.id, campanhas);
+              const qtdNoCarrinho = carrinho.find((i) => i.produtoId === p.id)?.quantidade || 0;
               return (
-                <button key={p.id} onClick={() => adicionarAoCarrinho(p)} disabled={p.quantidade <= 0}
-                  className="card text-left overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed group relative">
-                  {promo && <div className="absolute top-1.5 left-1.5 z-10"><PromoBadge percentual={promo.percentual} /></div>}
+                <div key={p.id}
+                  onClick={() => p.quantidade > 0 && adicionarAoCarrinho(p)}
+                  className="card text-left overflow-hidden group relative cursor-pointer"
+                  style={{ opacity: p.quantidade <= 0 ? 0.5 : 1, cursor: p.quantidade <= 0 ? 'not-allowed' : 'pointer', outline: campanha ? '2px solid var(--accent)' : 'none', outlineOffset: '-2px' }}>
+                  {qtdNoCarrinho > 0 && (
+                    <div className="absolute top-1.5 right-1.5 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold" style={{ background: 'var(--primary)', color: '#fff' }}>
+                      {qtdNoCarrinho}
+                    </div>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); setProdutoDetalhe(p); }} className="absolute bottom-1.5 right-1.5 z-20 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'rgba(36,27,47,0.55)' }} title="Detalhes">
+                    <span style={{ color: '#fff', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-display)' }}>i</span>
+                  </button>
+                  <div className="absolute top-1.5 left-1.5 z-10 flex flex-col gap-1 items-start">
+                    {promo && <PromoBadge percentual={promo.percentual} />}
+                    {p.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+                  </div>
                   <div className="aspect-square w-full flex items-center justify-center" style={{ background: categoryColor(p.categoria) + '1A' }}>
                     {p.imagemUrl ? (
                       <img src={p.imagemUrl} alt={p.nome} className="w-full h-full object-cover" />
@@ -660,8 +703,13 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, role, cai
                     <p className="text-[11px] mt-0.5" style={{ color: p.quantidade <= 0 ? 'var(--danger)' : 'var(--ink-soft)' }}>
                       {p.quantidade <= 0 ? 'Sem estoque' : `${p.quantidade} em estoque`}
                     </p>
+                    {campanha && (
+                      <p className="text-[11px] mt-1 font-medium flex items-center gap-1" style={{ color: '#8A6D1D' }}>
+                        <Tag size={10} /> {campanha.nome || campanha.subcategoria} · {diasRestantesTexto(campanha.dataFim)}
+                      </p>
+                    )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -669,19 +717,27 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, role, cai
           <div className="space-y-2">
             {produtosFiltrados.map((p) => {
               const promo = promocaoAtiva(p.id, promocoes);
+              const qtdNoCarrinho = carrinho.find((i) => i.produtoId === p.id)?.quantidade || 0;
               return (
-                <button key={p.id} onClick={() => adicionarAoCarrinho(p)} disabled={p.quantidade <= 0}
-                  className="card w-full flex items-center gap-3 p-3 text-left disabled:opacity-50 disabled:cursor-not-allowed">
-                  <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0" style={{ background: categoryColor(p.categoria) + '1A' }}>
+                <div key={p.id} onClick={() => p.quantidade > 0 && adicionarAoCarrinho(p)}
+                  className="card w-full flex items-center gap-3 p-3 text-left cursor-pointer"
+                  style={{ opacity: p.quantidade <= 0 ? 0.5 : 1, cursor: p.quantidade <= 0 ? 'not-allowed' : 'pointer' }}>
+                  <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0 relative" style={{ background: categoryColor(p.categoria) + '1A' }}>
                     {p.imagemUrl ? <img src={p.imagemUrl} className="w-full h-full object-cover rounded-lg" alt="" /> : <ImageIcon size={18} style={{ color: categoryColor(p.categoria) }} />}
+                    {qtdNoCarrinho > 0 && (
+                      <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: 'var(--primary)', color: '#fff' }}>{qtdNoCarrinho}</div>
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{p.nome}</p>
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--ink)' }}>{p.nome}{p.lancamento && <span className="ml-1.5 badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}</p>
                     <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.codigo} · {p.quantidade <= 0 ? 'sem estoque' : `${p.quantidade} un.`}</p>
                   </div>
                   {promo && <PromoBadge percentual={promo.percentual} />}
                   <p className="text-sm font-semibold shrink-0" style={{ color: 'var(--primary)' }}>{formatBRL(p.precoVenda)}</p>
-                </button>
+                  <button onClick={(e) => { e.stopPropagation(); setProdutoDetalhe(p); }} className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--bg)' }} title="Detalhes">
+                    <span style={{ color: 'var(--ink-soft)', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-display)' }}>i</span>
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -751,6 +807,11 @@ function PDVView({ produtos, clientes, categorias, empresa, promocoes, role, cai
             limparVenda();
           }}
         />
+      )}
+      {produtoDetalhe && (
+        <ProdutoDetalheModal produto={produtoDetalhe} promocoes={promocoes} campanhas={campanhas}
+          onAdicionar={() => { adicionarAoCarrinho(produtoDetalhe); setProdutoDetalhe(null); }}
+          onClose={() => setProdutoDetalhe(null)} />
       )}
     </div>
   );
@@ -1133,17 +1194,55 @@ function CheckoutModal({ carrinho, total, clientes, empresa, role, onClose, onCo
         </div>
       </div>
       <button onClick={confirmar} disabled={!pagamentoValido} className="btn-primary w-full disabled:opacity-40">Confirmar venda</button>
-      <p className="text-[11px] text-center mt-2" style={{ color: 'var(--ink-soft)' }}>Enter confirma · Esc cancela</p>
+      <p className="hidden md:block text-[11px] text-center mt-2" style={{ color: 'var(--ink-soft)' }}>Enter confirma · Esc cancela</p>
     </Modal>
   );
 }
 
 /* ============================== TELA: PRODUTOS ============================== */
 
-function ProdutoForm({ produto, categorias, onSalvar, onClose }) {
+function ProdutoDetalheModal({ produto, promocoes, campanhas, onAdicionar, onClose }) {
+  const promo = promocaoAtiva(produto.id, promocoes);
+  const campanha = campanhaAtiva(produto.id, campanhas);
+  return (
+    <Modal onClose={onClose} title="Detalhes do produto">
+      <div className="flex gap-3 mb-4">
+        <div className="w-20 h-20 rounded-lg flex items-center justify-center shrink-0" style={{ background: categoryColor(produto.categoria) + '1A' }}>
+          {produto.imagemUrl ? <img src={produto.imagemUrl} className="w-full h-full object-cover rounded-lg" alt="" /> : <ImageIcon size={24} style={{ color: categoryColor(produto.categoria) }} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium" style={{ color: 'var(--ink)' }}>{produto.nome}</p>
+          <p className="text-xs mb-1" style={{ color: 'var(--ink-soft)' }}>{produto.codigo} · {produto.subcategoria || produto.categoria}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {produto.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+            {promo && <PromoBadge percentual={promo.percentual} />}
+          </div>
+        </div>
+      </div>
+
+      {produto.descricao && <p className="text-sm mb-3" style={{ color: 'var(--ink)' }}>{produto.descricao}</p>}
+
+      {campanha && (
+        <p className="text-xs mb-3 flex items-center gap-1.5" style={{ color: '#8A6D1D' }}>
+          <Tag size={13} /> Participa da campanha "{campanha.nome || campanha.subcategoria}" · {diasRestantesTexto(campanha.dataFim)}
+        </p>
+      )}
+
+      <div className="space-y-1.5 pt-3 border-t text-sm" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex justify-between"><span style={{ color: 'var(--ink-soft)' }}>Preço</span><span className="font-semibold" style={{ color: 'var(--ink)' }}>{formatBRL(promo ? produto.precoVenda * (1 - promo.percentual / 100) : produto.precoVenda)}</span></div>
+        <div className="flex justify-between"><span style={{ color: 'var(--ink-soft)' }}>Estoque</span><span style={{ color: produto.quantidade <= 0 ? 'var(--danger)' : 'var(--ink)' }}>{produto.quantidade <= 0 ? 'Sem estoque' : `${produto.quantidade} unidade(s)`}</span></div>
+        {produto.fornecedor && <div className="flex justify-between"><span style={{ color: 'var(--ink-soft)' }}>Fornecedor</span><span style={{ color: 'var(--ink)' }}>{produto.fornecedor}</span></div>}
+      </div>
+
+      <button onClick={onAdicionar} disabled={produto.quantidade <= 0} className="btn-primary w-full mt-4 disabled:opacity-40">Adicionar à venda</button>
+    </Modal>
+  );
+}
+
+function ProdutoForm({ produto, categorias, fornecedores, onSalvar, onClose }) {
   const [form, setForm] = useState(produto || {
     codigo: '', nome: '', descricao: '', categoria: categorias[0]?.nome || '', subcategoria: '', precoCusto: '', precoVenda: '',
-    quantidade: '', estoqueIdeal: '', dataEntrada: todayISODate(), imagemUrl: null,
+    quantidade: '', estoqueIdeal: '', dataEntrada: todayISODate(), imagemUrl: null, fornecedor: '', lancamento: false,
   });
   const [showScanner, setShowScanner] = useState(false);
 
@@ -1216,6 +1315,17 @@ function ProdutoForm({ produto, categorias, onSalvar, onClose }) {
         <InputField label="Estoque ideal" type="number" value={form.estoqueIdeal} onChange={(e) => setForm({ ...form, estoqueIdeal: e.target.value })} />
       </div>
       <InputField label="Data de entrada no estoque" type="date" value={form.dataEntrada} onChange={(e) => setForm({ ...form, dataEntrada: e.target.value })} />
+      <label className="block mb-3">
+        <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Fornecedor</span>
+        <input list="lista-fornecedores" value={form.fornecedor || ''} onChange={(e) => setForm({ ...form, fornecedor: e.target.value })} className="campo" placeholder="Nome do fornecedor" />
+        <datalist id="lista-fornecedores">
+          {(fornecedores || []).map((f) => <option key={f.id} value={f.nome} />)}
+        </datalist>
+      </label>
+      <label className="flex items-center gap-2 mb-2 mt-1">
+        <input type="checkbox" checked={!!form.lancamento} onChange={(e) => setForm({ ...form, lancamento: e.target.checked })} className="w-4 h-4" />
+        <span className="text-sm" style={{ color: 'var(--ink-soft)' }}>Marcar como lançamento</span>
+      </label>
       <button onClick={salvar} className="btn-primary w-full mt-2">Salvar produto</button>
 
       {showScanner && (
@@ -1225,7 +1335,7 @@ function ProdutoForm({ produto, categorias, onSalvar, onClose }) {
   );
 }
 
-function ProdutosView({ produtos, categorias, role, onSalvar, onExcluir }) {
+function ProdutosView({ produtos, categorias, fornecedores, role, onSalvar, onExcluir }) {
   const [busca, setBusca] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
   const [editando, setEditando] = useState(null);
@@ -1293,8 +1403,11 @@ function ProdutosView({ produtos, categorias, role, onSalvar, onExcluir }) {
                 {filtrados.map((p) => (
                   <tr key={p.id} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
                     <td className="px-4 py-3">
-                      <p className="font-medium" style={{ color: 'var(--ink)' }}>{p.nome}</p>
-                      <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.codigo}</p>
+                      <p className="font-medium flex items-center gap-1.5" style={{ color: 'var(--ink)' }}>
+                        {p.nome}
+                        {p.lancamento && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}>Lançamento</span>}
+                      </p>
+                      <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.codigo}{p.fornecedor ? ` · ${p.fornecedor}` : ''}</p>
                     </td>
                     <td className="px-4 py-3">
                       <span className="badge" style={{ background: categoryColor(p.categoria) + '1A', color: categoryColor(p.categoria) }}>{p.subcategoria || p.categoria}</span>
@@ -1319,7 +1432,7 @@ function ProdutosView({ produtos, categorias, role, onSalvar, onExcluir }) {
       )}
 
       {podeEditar && (novo || editando) && (
-        <ProdutoForm produto={editando && !editando.__novo ? editando : (editando && editando.__novo ? { ...editando, id: undefined } : null)} categorias={categorias}
+        <ProdutoForm produto={editando && !editando.__novo ? editando : (editando && editando.__novo ? { ...editando, id: undefined } : null)} categorias={categorias} fornecedores={fornecedores}
           onSalvar={(p) => { onSalvar(p); setNovo(false); setEditando(null); }}
           onClose={() => { setNovo(false); setEditando(null); }} />
       )}
@@ -1336,7 +1449,7 @@ function ProdutosView({ produtos, categorias, role, onSalvar, onExcluir }) {
 /* ============================== TELA: CLIENTES ============================== */
 
 function ClienteForm({ cliente, onSalvar, onClose }) {
-  const [form, setForm] = useState(cliente || { nome: '', sobrenome: '', telefone: '', email: '', cpf: '', cep: '', endereco: '', observacao: '', querNotaFiscal: false });
+  const [form, setForm] = useState(cliente || { nome: '', sobrenome: '', telefone: '', email: '', cpf: '', cep: '', endereco: '', numero: '', complemento: '', observacao: '', querNotaFiscal: false });
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [erroCep, setErroCep] = useState('');
 
@@ -1389,7 +1502,11 @@ function ClienteForm({ cliente, onSalvar, onClose }) {
         </div>
         {erroCep && <span className="block text-xs mt-1" style={{ color: 'var(--danger)' }}>{erroCep}</span>}
       </label>
-      <InputField label="Endereço" value={form.endereco || ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Preenchido automaticamente pelo CEP, ou digite" />
+      <InputField label="Endereço" value={form.endereco || ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro, cidade" />
+      <div className="grid grid-cols-2 gap-x-4">
+        <InputField label="Número" value={form.numero || ''} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
+        <InputField label="Complemento" value={form.complemento || ''} onChange={(e) => setForm({ ...form, complemento: e.target.value })} placeholder="Apto, bloco..." />
+      </div>
       <label className="block mb-3">
         <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Observação</span>
         <textarea rows={3} value={form.observacao || ''} onChange={(e) => setForm({ ...form, observacao: e.target.value })} placeholder="Preferências, combinados, histórico relevante..." className="campo" style={{ resize: 'vertical' }} />
@@ -1523,12 +1640,13 @@ function DiferencaLabel({ diferenca }) {
   return <span style={{ color: arredondado < 0 ? 'var(--danger)' : 'var(--warning)', fontWeight: 600 }}>{arredondado > 0 ? 'Sobra ' : 'Falta '}{formatBRL(Math.abs(arredondado))}</span>;
 }
 
-function CaixaView({ caixas, vendas, movimentacoes, role, onAbrir, onFechar, onRegistrarSangria }) {
+function CaixaView({ caixas, vendas, movimentacoes, produtos, fornecedores, sessao, role, onAbrir, onFechar, onRegistrarSangria, onRegistrarTroca }) {
   const hoje = todayISODate();
   const caixaHoje = caixas.find((c) => c.data === hoje);
   const [showAbrir, setShowAbrir] = useState(false);
   const [showFechar, setShowFechar] = useState(false);
   const [showSangria, setShowSangria] = useState(false);
+  const [showTroca, setShowTroca] = useState(false);
   const [dataConsulta, setDataConsulta] = useState(hoje);
 
   function resumoDoDia(data) {
@@ -1601,8 +1719,9 @@ function CaixaView({ caixas, vendas, movimentacoes, role, onAbrir, onFechar, onR
                   <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>Aberto às {new Date(caixaHoje.aberturaEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · fundo de troco {formatBRL(caixaHoje.valorAbertura)}</p>
                 </div>
                 {caixaHoje.status === 'aberto' && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     {role === 'admin' && <button onClick={() => setShowSangria(true)} className="btn-secondary flex items-center gap-1.5"><Wallet size={14} /> Sangria</button>}
+                    <button onClick={() => setShowTroca(true)} className="btn-secondary flex items-center gap-1.5"><RefreshCw size={14} /> Troca/Devolução</button>
                     <button onClick={() => setShowFechar(true)} className="btn-secondary">Fechar caixa</button>
                   </div>
                 )}
@@ -1737,6 +1856,11 @@ function CaixaView({ caixas, vendas, movimentacoes, role, onAbrir, onFechar, onR
 
       {showAbrir && <AbrirCaixaForm onClose={() => setShowAbrir(false)} onSalvar={(valor) => { onAbrir(valor); setShowAbrir(false); }} />}
       {showSangria && <SangriaForm onClose={() => setShowSangria(false)} onSalvar={(dados) => { onRegistrarSangria(dados); setShowSangria(false); }} />}
+      {showTroca && (
+        <TrocaDevolucaoForm produtos={produtos} fornecedores={fornecedores} sessaoLogin={sessao?.login}
+          onClose={() => setShowTroca(false)}
+          onSalvar={(dados) => { onRegistrarTroca(dados); setShowTroca(false); }} />
+      )}
       {showFechar && caixaHoje && (
         <FecharCaixaForm caixa={caixaHoje} resumo={calcularCaixa(caixaHoje)} onClose={() => setShowFechar(false)}
           onSalvar={(dados) => { onFechar(caixaHoje.id, dados); setShowFechar(false); }} />
@@ -1794,10 +1918,126 @@ function PromoForm({ promocao, produtos, onSalvar, onClose }) {
   );
 }
 
-function PromocoesView({ produtos, promocoes, onSalvar, onExcluir }) {
+function diasRestantesTexto(dataFim) {
+  const hoje = todayISODate();
+  if (hoje > dataFim) return 'Encerrada';
+  const dias = Math.round((new Date(dataFim + 'T00:00:00') - new Date(hoje + 'T00:00:00')) / 86400000);
+  if (dias === 0) return 'Termina hoje';
+  if (dias === 1) return 'Falta 1 dia';
+  return `Faltam ${dias} dias`;
+}
+
+function CampanhaForm({ campanha, produtos, onSalvar, onClose }) {
+  const [form, setForm] = useState(campanha || { nome: '', subcategoria: CAMPANHAS_SUBCATEGORIAS[0], produtosIds: [], dataInicio: todayISODate(), dataFim: todayISODate() });
+  const [busca, setBusca] = useState('');
+
+  function toggleProduto(id) {
+    setForm((f) => ({ ...f, produtosIds: f.produtosIds.includes(id) ? f.produtosIds.filter((x) => x !== id) : [...f.produtosIds, id] }));
+  }
+  function salvar() {
+    if (form.produtosIds.length === 0) return;
+    onSalvar({ ...form, id: form.id || uid('camp') });
+  }
+  const produtosFiltrados = produtos.filter((p) => p.nome.toLowerCase().includes(busca.trim().toLowerCase()));
+
+  return (
+    <Modal onClose={onClose} title={campanha ? 'Editar campanha' : 'Nova campanha'} wide>
+      <InputField label="Nome da campanha" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex.: Black Friday bolsas" />
+      <label className="block mb-3">
+        <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Data comemorativa</span>
+        <select value={form.subcategoria} onChange={(e) => setForm({ ...form, subcategoria: e.target.value })} className="campo">
+          {CAMPANHAS_SUBCATEGORIAS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </label>
+      <div className="grid grid-cols-2 gap-x-4">
+        <InputField label="Início" type="date" value={form.dataInicio} onChange={(e) => setForm({ ...form, dataInicio: e.target.value })} />
+        <InputField label="Fim" type="date" value={form.dataFim} onChange={(e) => setForm({ ...form, dataFim: e.target.value })} />
+      </div>
+      <p className="text-xs font-medium mb-2 mt-1" style={{ color: 'var(--ink-soft)' }}>Produtos em destaque ({form.produtosIds.length} selecionado(s))</p>
+      <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar produto..." className="campo mb-2" />
+      <div className="max-h-52 overflow-y-auto border rounded-lg divide-y" style={{ borderColor: 'var(--border)' }}>
+        {produtosFiltrados.map((p) => (
+          <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={form.produtosIds.includes(p.id)} onChange={() => toggleProduto(p.id)} className="w-4 h-4" />
+            <span style={{ color: 'var(--ink)' }}>{p.nome}</span>
+          </label>
+        ))}
+      </div>
+      <button onClick={salvar} className="btn-primary w-full mt-4">Salvar campanha</button>
+    </Modal>
+  );
+}
+
+function CampanhasView({ produtos, campanhas, role, onSalvar, onExcluir }) {
   const [novo, setNovo] = useState(false);
   const [editando, setEditando] = useState(null);
   const [excluir, setExcluir] = useState(null);
+  const podeEditar = role === 'admin';
+
+  function status(c) {
+    const hoje = todayISODate();
+    if (hoje < c.dataInicio) return { label: 'Agendada', cor: 'var(--accent)' };
+    if (hoje > c.dataFim) return { label: 'Encerrada', cor: 'var(--ink-soft)' };
+    return { label: 'Ativa', cor: 'var(--success)' };
+  }
+
+  return (
+    <div className="p-4 md:p-6 pb-24 md:pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+        <h2 className="text-xl" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink)' }}>Campanhas</h2>
+        {podeEditar && <button onClick={() => setNovo(true)} className="btn-primary flex items-center gap-1.5 justify-center"><Plus size={16} /> Nova campanha</button>}
+      </div>
+      <p className="text-xs mb-4" style={{ color: 'var(--ink-soft)' }}>
+        Datas comemorativas com produtos em destaque na tela de venda — sem desconto automático (para desconto, use Promoções).
+      </p>
+
+      {campanhas.length === 0 ? (
+        <EmptyState icone={Tag} titulo="Nenhuma campanha cadastrada" subtitulo="Crie uma campanha para destacar produtos na venda em datas como Natal ou Black Friday." />
+      ) : (
+        <div className="space-y-3">
+          {campanhas.map((c) => {
+            const s = status(c);
+            return (
+              <div key={c.id} className="card p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="font-medium text-sm" style={{ color: 'var(--ink)' }}>{c.nome || c.subcategoria}</span>
+                    <span className="badge" style={{ background: s.cor + '1A', color: s.cor }}>{s.label}</span>
+                    {s.label !== 'Encerrada' && <span className="badge" style={{ background: '#EFE7CE', color: '#8A6D1D' }}><Clock size={11} /> {diasRestantesTexto(c.dataFim)}</span>}
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{c.subcategoria} · {c.produtosIds.length} produto(s) em destaque · {formatDateBR(c.dataInicio)} a {formatDateBR(c.dataFim)}</p>
+                </div>
+                {podeEditar && (
+                  <div className="shrink-0 whitespace-nowrap">
+                    <button onClick={() => setEditando(c)} className="text-xs font-medium mr-3" style={{ color: 'var(--primary)' }}>Editar</button>
+                    <button onClick={() => setExcluir(c)} className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Excluir</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {podeEditar && (novo || editando) && (
+        <CampanhaForm campanha={editando} produtos={produtos}
+          onSalvar={(c) => { onSalvar(c); setNovo(false); setEditando(null); }}
+          onClose={() => { setNovo(false); setEditando(null); }} />
+      )}
+      {excluir && (
+        <ConfirmDialog texto={`Excluir a campanha "${excluir.nome || excluir.subcategoria}"?`}
+          onCancelar={() => setExcluir(null)}
+          onConfirmar={() => { onExcluir(excluir.id); setExcluir(null); }} />
+      )}
+    </div>
+  );
+}
+
+function PromocoesView({ produtos, promocoes, role, onSalvar, onExcluir }) {
+  const [novo, setNovo] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [excluir, setExcluir] = useState(null);
+  const podeEditar = role === 'admin';
 
   function status(p) {
     const hoje = todayISODate();
@@ -1809,15 +2049,15 @@ function PromocoesView({ produtos, promocoes, onSalvar, onExcluir }) {
   return (
     <div className="p-4 md:p-6 pb-24 md:pb-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
-        <h2 className="text-xl" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink)' }}>Campanhas e promoções</h2>
-        <button onClick={() => setNovo(true)} className="btn-primary flex items-center gap-1.5 justify-center"><Plus size={16} /> Nova promoção</button>
+        <h2 className="text-xl" style={{ fontFamily: 'var(--font-display)', color: 'var(--ink)' }}>Promoções</h2>
+        {podeEditar && <button onClick={() => setNovo(true)} className="btn-primary flex items-center gap-1.5 justify-center"><Plus size={16} /> Nova promoção</button>}
       </div>
       <p className="text-xs mb-4" style={{ color: 'var(--ink-soft)' }}>
-        Cupons de 5%, 10% ou 15% são aplicados automaticamente na venda para os produtos e o período escolhidos. Categorias de campanha em Produtos: {CAMPANHAS_SUBCATEGORIAS.join(', ')}.
+        Cupons de desconto (5%, 10% ou 15%) aplicados automaticamente na venda para os produtos e o período escolhidos.
       </p>
 
       {promocoes.length === 0 ? (
-        <EmptyState icone={Tag} titulo="Nenhuma promoção cadastrada" subtitulo="Crie cupons de desconto por período para datas como Black Friday e Natal." />
+        <EmptyState icone={Percent} titulo="Nenhuma promoção cadastrada" subtitulo="Crie cupons de desconto por período para datas como Black Friday e Natal." />
       ) : (
         <div className="space-y-3">
           {promocoes.map((p) => {
@@ -1828,20 +2068,23 @@ function PromocoesView({ produtos, promocoes, onSalvar, onExcluir }) {
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="font-medium text-sm" style={{ color: 'var(--ink)' }}>{p.nome || `Cupom ${p.percentual}%`}</span>
                     <span className="badge" style={{ background: s.cor + '1A', color: s.cor }}>{s.label}</span>
+                    {s.label !== 'Encerrada' && <span className="badge" style={{ background: 'var(--bg)', color: 'var(--ink-soft)' }}><Clock size={11} /> {diasRestantesTexto(p.dataFim)}</span>}
                   </div>
                   <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{p.percentual}% off · {p.produtosIds.length} produto(s) · {formatDateBR(p.dataInicio)} a {formatDateBR(p.dataFim)}</p>
                 </div>
-                <div className="shrink-0 whitespace-nowrap">
-                  <button onClick={() => setEditando(p)} className="text-xs font-medium mr-3" style={{ color: 'var(--primary)' }}>Editar</button>
-                  <button onClick={() => setExcluir(p)} className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Excluir</button>
-                </div>
+                {podeEditar && (
+                  <div className="shrink-0 whitespace-nowrap">
+                    <button onClick={() => setEditando(p)} className="text-xs font-medium mr-3" style={{ color: 'var(--primary)' }}>Editar</button>
+                    <button onClick={() => setExcluir(p)} className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Excluir</button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {(novo || editando) && (
+      {podeEditar && (novo || editando) && (
         <PromoForm promocao={editando} produtos={produtos}
           onSalvar={(p) => { onSalvar(p); setNovo(false); setEditando(null); }}
           onClose={() => { setNovo(false); setEditando(null); }} />
@@ -1883,6 +2126,108 @@ function MiniBar({ label, valor, max, cor }) {
         <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: cor }} />
       </div>
     </div>
+  );
+}
+
+function TrocaDevolucaoForm({ produtos, fornecedores, sessaoLogin, onSalvar, onClose }) {
+  const [tipo, setTipo] = useState('devolucao');
+  const [produtoDevolvidoId, setProdutoDevolvidoId] = useState('');
+  const [produtoNovoId, setProdutoNovoId] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [fornecedor, setFornecedor] = useState('');
+  const [dataDevolucao, setDataDevolucao] = useState(todayISODate());
+  const [formaPagamento, setFormaPagamento] = useState('dinheiro');
+
+  const produtoDevolvido = produtos.find((p) => p.id === produtoDevolvidoId);
+  const produtoNovo = produtos.find((p) => p.id === produtoNovoId);
+  const diferenca = produtoNovo && produtoDevolvido ? Math.max(0, produtoNovo.precoVenda - produtoDevolvido.precoVenda) : 0;
+
+  function salvar() {
+    if (!produtoDevolvidoId) return;
+    if (tipo === 'credito' && !produtoNovoId) return;
+    onSalvar({
+      tipo,
+      produtoDevolvidoId,
+      produtoDevolvidoNome: produtoDevolvido?.nome,
+      produtoNovoId: tipo === 'credito' ? produtoNovoId : null,
+      produtoNovoNome: tipo === 'credito' ? produtoNovo?.nome : null,
+      motivo,
+      fornecedor,
+      dataDevolucao,
+      valorDiferenca: tipo === 'credito' ? diferenca : 0,
+      formaPagamento: tipo === 'credito' ? formaPagamento : null,
+    });
+  }
+
+  return (
+    <Modal onClose={onClose} title="Troca / Devolução" wide>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <button onClick={() => setTipo('devolucao')} className="px-3 py-2.5 rounded-lg border text-sm font-medium"
+          style={tipo === 'devolucao' ? { borderColor: 'var(--primary)', background: 'var(--primary)10', color: 'var(--primary)' } : { borderColor: 'var(--border)', color: 'var(--ink-soft)' }}>
+          Devolução simples
+        </button>
+        <button onClick={() => setTipo('credito')} className="px-3 py-2.5 rounded-lg border text-sm font-medium"
+          style={tipo === 'credito' ? { borderColor: 'var(--primary)', background: 'var(--primary)10', color: 'var(--primary)' } : { borderColor: 'var(--border)', color: 'var(--ink-soft)' }}>
+          Crédito ao cliente
+        </button>
+      </div>
+      {tipo === 'credito' && (
+        <p className="text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>
+          Cliente não gostou de um produto em bom estado e dentro do prazo, e quer levar outro mais caro pagando só a diferença. O produto devolvido volta ao estoque, o novo sai do estoque, e apenas a diferença entra no caixa — sem estorno da venda original.
+        </p>
+      )}
+
+      <label className="block mb-3">
+        <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Produto devolvido</span>
+        <select value={produtoDevolvidoId} onChange={(e) => setProdutoDevolvidoId(e.target.value)} className="campo">
+          <option value="">Selecione o produto</option>
+          {produtos.map((p) => <option key={p.id} value={p.id}>{p.nome} — {formatBRL(p.precoVenda)}</option>)}
+        </select>
+      </label>
+
+      {tipo === 'credito' && (
+        <label className="block mb-3">
+          <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Produto novo (mais caro)</span>
+          <select value={produtoNovoId} onChange={(e) => setProdutoNovoId(e.target.value)} className="campo">
+            <option value="">Selecione o produto</option>
+            {produtos.filter((p) => p.id !== produtoDevolvidoId).map((p) => <option key={p.id} value={p.id}>{p.nome} — {formatBRL(p.precoVenda)}</option>)}
+          </select>
+        </label>
+      )}
+
+      {tipo === 'credito' && produtoNovo && produtoDevolvido && (
+        <div className="p-3 rounded-lg mb-3 text-sm space-y-1" style={{ background: 'var(--bg)' }}>
+          <div className="flex justify-between"><span style={{ color: 'var(--ink-soft)' }}>Produto devolvido</span><span style={{ color: 'var(--ink)' }}>{formatBRL(produtoDevolvido.precoVenda)}</span></div>
+          <div className="flex justify-between"><span style={{ color: 'var(--ink-soft)' }}>Produto novo</span><span style={{ color: 'var(--ink)' }}>{formatBRL(produtoNovo.precoVenda)}</span></div>
+          <div className="flex justify-between font-semibold pt-1.5 mt-1.5 border-t" style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}><span>Diferença a cobrar</span><span>{formatBRL(diferenca)}</span></div>
+        </div>
+      )}
+
+      {tipo === 'credito' && diferenca > 0 && (
+        <label className="block mb-3">
+          <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Forma de pagamento da diferença</span>
+          <select value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} className="campo">
+            {FORMAS_PAGAMENTO.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+          </select>
+        </label>
+      )}
+
+      <InputField label="Motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: não gostou, tamanho errado, defeito" />
+      <div className="grid grid-cols-2 gap-x-4">
+        <label className="block mb-3">
+          <span className="block text-xs font-medium mb-1" style={{ color: 'var(--ink-soft)' }}>Fornecedor</span>
+          <input list="lista-fornecedores-troca" value={fornecedor} onChange={(e) => setFornecedor(e.target.value)} className="campo" />
+          <datalist id="lista-fornecedores-troca">
+            {(fornecedores || []).map((f) => <option key={f.id} value={f.nome} />)}
+          </datalist>
+        </label>
+        <InputField label="Data da devolução" type="date" value={dataDevolucao} onChange={(e) => setDataDevolucao(e.target.value)} />
+      </div>
+
+      <p className="text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>Registrado por: <strong>{sessaoLogin}</strong></p>
+
+      <button onClick={salvar} className="btn-primary w-full">Confirmar</button>
+    </Modal>
   );
 }
 
@@ -2113,7 +2458,20 @@ function DashboardView({ produtos, clientes, vendas, movimentacoes, role, onRegi
 
 /* ============================== TELA: CONFIGURAÇÕES ============================== */
 
-function ConfigView({ empresa, onSalvarEmpresa, categorias, onSalvarCategorias, onResetDemo, auth, onSalvarAuth }) {
+function ConfigView({ empresa, onSalvarEmpresa, categorias, onSalvarCategorias, onResetDemo, auth, onSalvarAuth, fornecedores, onSalvarFornecedores }) {
+  const [novoFornecedor, setNovoFornecedor] = useState('');
+  const [telefoneFornecedor, setTelefoneFornecedor] = useState('');
+
+  function adicionarFornecedor() {
+    const nome = novoFornecedor.trim();
+    if (!nome) return;
+    onSalvarFornecedores([...(fornecedores || []), { id: uid('forn'), nome, telefone: telefoneFornecedor }]);
+    setNovoFornecedor('');
+    setTelefoneFornecedor('');
+  }
+  function removerFornecedor(id) {
+    onSalvarFornecedores((fornecedores || []).filter((f) => f.id !== id));
+  }
   const [form, setForm] = useState(empresa);
   const [formAuth, setFormAuth] = useState(auth);
   const [novaCategoria, setNovaCategoria] = useState('');
@@ -2194,6 +2552,24 @@ function ConfigView({ empresa, onSalvarEmpresa, categorias, onSalvarCategorias, 
       </div>
 
       <div className="card p-5 mb-4">
+        <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Fornecedores</h3>
+        <div className="space-y-2 mb-3">
+          {(fornecedores || []).length === 0 && <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>Nenhum fornecedor cadastrado ainda.</p>}
+          {(fornecedores || []).map((f) => (
+            <div key={f.id} className="flex items-center justify-between text-sm">
+              <span style={{ color: 'var(--ink)' }}>{f.nome}{f.telefone ? ` · ${formatTelefone(f.telefone)}` : ''}</span>
+              <button onClick={() => removerFornecedor(f.id)} className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Remover</button>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input value={novoFornecedor} onChange={(e) => setNovoFornecedor(e.target.value)} placeholder="Nome do fornecedor" className="campo" />
+          <input value={telefoneFornecedor} onChange={(e) => setTelefoneFornecedor(onlyDigits(e.target.value))} placeholder="Telefone (opcional)" className="campo" />
+        </div>
+        <button onClick={adicionarFornecedor} className="btn-secondary mt-2">Adicionar fornecedor</button>
+      </div>
+
+      <div className="card p-5 mb-4">
         <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--ink)' }}>Categorias de produtos</h3>
         <div className="flex flex-wrap gap-2 mb-3">
           {categorias.map((c) => (
@@ -2237,6 +2613,9 @@ export default function App() {
   const [promocoes, setPromocoes] = useState([]);
   const [movimentacoes, setMovimentacoes] = useState([]);
   const [caixas, setCaixas] = useState([]);
+  const [fornecedores, setFornecedores] = useState([]);
+  const [campanhas, setCampanhas] = useState([]);
+  const [trocas, setTrocas] = useState([]);
   const [auth, setAuth] = useState(DEFAULT_AUTH);
   const [empresa, setEmpresa] = useState({ nome: '', cnpj: '', endereco: '', telefone: '', logoUrl: null, emailjsServiceId: '', emailjsTemplateId: '', emailjsPublicKey: '' });
   const [toast, setToast] = useState(null);
@@ -2248,7 +2627,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      let catalogo = null, clientesData = null, vendasData = null, empresaData = null, authData = null, promocoesData = null, movimentacoesData = null, caixasData = null, sessaoData = null;
+      let catalogo = null, clientesData = null, vendasData = null, empresaData = null, authData = null, promocoesData = null, movimentacoesData = null, caixasData = null, fornecedoresData = null, campanhasData = null, trocasData = null, sessaoData = null;
       try { catalogo = JSON.parse((await window.storage.get(STORAGE_KEYS.CATALOGO)).value); } catch (e) {}
       try { clientesData = JSON.parse((await window.storage.get(STORAGE_KEYS.CLIENTES)).value); } catch (e) {}
       try { vendasData = JSON.parse((await window.storage.get(STORAGE_KEYS.VENDAS)).value); } catch (e) {}
@@ -2257,6 +2636,9 @@ export default function App() {
       try { promocoesData = JSON.parse((await window.storage.get(STORAGE_KEYS.PROMOCOES)).value); } catch (e) {}
       try { movimentacoesData = JSON.parse((await window.storage.get(STORAGE_KEYS.MOVIMENTACOES)).value); } catch (e) {}
       try { caixasData = JSON.parse((await window.storage.get(STORAGE_KEYS.CAIXAS)).value); } catch (e) {}
+      try { fornecedoresData = JSON.parse((await window.storage.get(STORAGE_KEYS.FORNECEDORES)).value); } catch (e) {}
+      try { campanhasData = JSON.parse((await window.storage.get(STORAGE_KEYS.CAMPANHAS)).value); } catch (e) {}
+      try { trocasData = JSON.parse((await window.storage.get(STORAGE_KEYS.TROCAS)).value); } catch (e) {}
       try { sessaoData = JSON.parse((await window.storage.get(STORAGE_KEYS.SESSAO)).value); } catch (e) {}
 
       // Cada informação é tratada de forma independente: uma falha ao ler
@@ -2294,6 +2676,9 @@ export default function App() {
       if (promocoesData) setPromocoes(promocoesData);
       if (movimentacoesData) setMovimentacoes(movimentacoesData);
       if (caixasData) setCaixas(caixasData);
+      if (fornecedoresData) setFornecedores(fornecedoresData);
+      if (campanhasData) setCampanhas(campanhasData);
+      if (trocasData) setTrocas(trocasData);
       if (empresaData) setEmpresa(empresaData);
       if (sessaoData && sessaoData.role) setSessao(sessaoData);
 
@@ -2340,6 +2725,21 @@ export default function App() {
   const salvarCaixas = useCallback(async (next) => {
     setCaixas(next);
     try { await window.storage.set(STORAGE_KEYS.CAIXAS, JSON.stringify(next)); } catch (e) {}
+  }, []);
+
+  const salvarFornecedores = useCallback(async (next) => {
+    setFornecedores(next);
+    try { await window.storage.set(STORAGE_KEYS.FORNECEDORES, JSON.stringify(next)); } catch (e) {}
+  }, []);
+
+  const salvarCampanhas = useCallback(async (next) => {
+    setCampanhas(next);
+    try { await window.storage.set(STORAGE_KEYS.CAMPANHAS, JSON.stringify(next)); } catch (e) {}
+  }, []);
+
+  const salvarTrocas = useCallback(async (next) => {
+    setTrocas(next);
+    try { await window.storage.set(STORAGE_KEYS.TROCAS, JSON.stringify(next)); } catch (e) {}
   }, []);
 
   function handleAbrirCaixa(valorAbertura) {
@@ -2430,6 +2830,62 @@ export default function App() {
     const nova = { id: uid('sang'), valor, motivo, data: new Date().toISOString() };
     salvarMovimentacoes([nova, ...movimentacoes]);
     avisar('Sangria registrada', 'ok');
+  }
+
+  function handleSalvarCampanha(campanha) {
+    const existe = campanhas.some((c) => c.id === campanha.id);
+    const next = existe ? campanhas.map((c) => (c.id === campanha.id ? campanha : c)) : [campanha, ...campanhas];
+    salvarCampanhas(next);
+    avisar(existe ? 'Campanha atualizada' : 'Campanha criada', 'ok');
+  }
+
+  function handleExcluirCampanha(id) {
+    salvarCampanhas(campanhas.filter((c) => c.id !== id));
+    avisar('Campanha removida', 'ok');
+  }
+
+  function handleRegistrarTroca(dados) {
+    // dados: { tipo: 'devolucao' | 'credito', produtoDevolvidoId, produtoDevolvidoNome, produtoNovoId, produtoNovoNome,
+    //          motivo, fornecedor, dataDevolucao, valorDiferenca, formaPagamento }
+    const registro = {
+      id: uid('troca'),
+      data: new Date().toISOString(),
+      login: sessao?.login,
+      ...dados,
+    };
+    salvarTrocas([registro, ...trocas]);
+
+    // 1) o produto devolvido sempre volta ao estoque (+1)
+    let produtosAtualizados = produtos.map((p) =>
+      p.id === dados.produtoDevolvidoId ? { ...p, quantidade: p.quantidade + 1 } : p
+    );
+
+    // 2) no crédito ao cliente, o novo produto sai do estoque (-1) e só a diferença entra no caixa,
+    //    sem mexer na receita da venda original (nada de estorno)
+    if (dados.tipo === 'credito' && dados.produtoNovoId) {
+      produtosAtualizados = produtosAtualizados.map((p) =>
+        p.id === dados.produtoNovoId ? { ...p, quantidade: Math.max(0, p.quantidade - 1) } : p
+      );
+      if (dados.valorDiferenca > 0) {
+        const venda = {
+          id: uid('v'),
+          data: new Date().toISOString(),
+          clienteId: null,
+          clienteNome: `Troca — ${dados.produtoDevolvidoNome} por ${dados.produtoNovoNome}`,
+          numero: 'TRC' + Date.now().toString().slice(-8),
+          itens: [{ produtoId: dados.produtoNovoId, nome: `Diferença: ${dados.produtoDevolvidoNome} → ${dados.produtoNovoNome}`, codigo: '', precoUnitario: dados.valorDiferenca, quantidade: 1, percentualPromo: 0 }],
+          formaPagamento: dados.formaPagamento,
+          total: dados.valorDiferenca,
+          descontoAdicional: 0,
+          parcelasCredito: 1,
+          origemTroca: true,
+          notaFiscal: { solicitada: false, cpf: '', enviada: false, canal: null },
+        };
+        salvarVendas([venda, ...vendas]);
+      }
+    }
+    salvarProdutos(produtosAtualizados);
+    avisar(dados.tipo === 'credito' ? 'Troca com crédito registrada' : 'Devolução registrada', 'ok');
   }
 
   function handleFinalizarVenda({ carrinho, clienteId, clienteNome, formaPagamento, total, descontoAdicional, parcelasCredito, notaFiscal }) {
@@ -2523,13 +2979,15 @@ export default function App() {
         <div className="flex">
           <Sidebar view={view} setView={setView} empresa={empresa} sessao={sessao} onSair={handleSair} />
           <div className="flex-1 min-w-0">
-            {view === 'pdv' && <PDVView produtos={produtos} clientes={clientes} categorias={categorias} empresa={empresa} promocoes={promocoes} role={sessao.role} caixaAberto={caixas.some((c) => c.data === todayISODate() && c.status === 'aberto')} onAbrirCaixa={handleAbrirCaixa} onFinalizarVenda={handleFinalizarVenda} />}
-            {view === 'produtos' && <ProdutosView produtos={produtos} categorias={categorias} role={sessao.role} onSalvar={handleSalvarProduto} onExcluir={handleExcluirProduto} />}
+            <MobileTopBar empresa={empresa} sessao={sessao} onSair={handleSair} />
+            {view === 'pdv' && <PDVView produtos={produtos} clientes={clientes} categorias={categorias} empresa={empresa} promocoes={promocoes} campanhas={campanhas} role={sessao.role} caixaAberto={caixas.some((c) => c.data === todayISODate() && c.status === 'aberto')} onAbrirCaixa={handleAbrirCaixa} onFinalizarVenda={handleFinalizarVenda} />}
+            {view === 'produtos' && <ProdutosView produtos={produtos} categorias={categorias} fornecedores={fornecedores} role={sessao.role} onSalvar={handleSalvarProduto} onExcluir={handleExcluirProduto} />}
             {view === 'clientes' && <ClientesView clientes={clientes} vendas={vendas} onSalvar={handleSalvarCliente} onExcluir={handleExcluirCliente} />}
-            {view === 'caixa' && <CaixaView caixas={caixas} vendas={vendas} movimentacoes={movimentacoes} role={sessao.role} onAbrir={handleAbrirCaixa} onFechar={handleFecharCaixa} onRegistrarSangria={handleRegistrarSangria} />}
+            {view === 'caixa' && <CaixaView caixas={caixas} vendas={vendas} movimentacoes={movimentacoes} produtos={produtos} fornecedores={fornecedores} sessao={sessao} role={sessao.role} onAbrir={handleAbrirCaixa} onFechar={handleFecharCaixa} onRegistrarSangria={handleRegistrarSangria} onRegistrarTroca={handleRegistrarTroca} />}
             {view === 'dashboard' && <DashboardView produtos={produtos} clientes={clientes} vendas={vendas} movimentacoes={movimentacoes} role={sessao.role} onRegistrarSangria={handleRegistrarSangria} />}
-            {view === 'promocoes' && sessao.role === 'admin' && <PromocoesView produtos={produtos} promocoes={promocoes} onSalvar={handleSalvarPromocao} onExcluir={handleExcluirPromocao} />}
-            {view === 'config' && sessao.role === 'admin' && <ConfigView empresa={empresa} onSalvarEmpresa={salvarEmpresa} categorias={categorias} onSalvarCategorias={handleSalvarCategorias} onResetDemo={handleResetDemo} auth={auth} onSalvarAuth={handleSalvarAuth} />}
+            {view === 'campanhas' && <CampanhasView produtos={produtos} campanhas={campanhas} role={sessao.role} onSalvar={handleSalvarCampanha} onExcluir={handleExcluirCampanha} />}
+            {view === 'promocoes' && <PromocoesView produtos={produtos} promocoes={promocoes} role={sessao.role} onSalvar={handleSalvarPromocao} onExcluir={handleExcluirPromocao} />}
+            {view === 'config' && sessao.role === 'admin' && <ConfigView empresa={empresa} onSalvarEmpresa={salvarEmpresa} categorias={categorias} onSalvarCategorias={handleSalvarCategorias} onResetDemo={handleResetDemo} auth={auth} onSalvarAuth={handleSalvarAuth} fornecedores={fornecedores} onSalvarFornecedores={salvarFornecedores} />}
           </div>
         </div>
       )}
